@@ -2,18 +2,20 @@ from typing import Dict
 
 import tensorflow as tf
 
-from ..networks import Linear, DNN
+from ..networks import Linear, DNN, FM
 from ..utils import (
     create_embedding_dict,
     get_feature_tensors,
     combine_dnn_tensors,
+    group_embedding_by_dim,
 )
 
 
-class WideDeepModel(tf.keras.Model):
+class DeepFM(tf.keras.Model):
     def __init__(
         self,
         linear_feature_columns,
+        fm_feature_columns,
         dnn_feature_columns,
         embedding_regularizer=tf.keras.regularizers.l2(1e-5),
         linear_use_bias=False,
@@ -29,7 +31,7 @@ class WideDeepModel(tf.keras.Model):
         dnn_kernel_regularizer=tf.keras.regularizers.l2(1e-5),
         dnn_bias_regularizer=None,
     ):
-        super(WideDeepModel, self).__init__()
+        super(DeepFM, self).__init__()
 
         self.linear_model = Linear(
             linear_feature_columns,
@@ -57,19 +59,44 @@ class WideDeepModel(tf.keras.Model):
             bias_regularizer=dnn_bias_regularizer,
         )
         self.dnn_feature_columns = dnn_feature_columns
+        self.fm_feature_names = [feat.name for feat in fm_feature_columns]
         self.sparse_embedding_dict = create_embedding_dict(dnn_feature_columns)
-        self.final = tf.keras.layers.Dense(1, activation="sigmoid")
 
     def call(self, features: Dict[str, tf.Tensor], **kwargs):
         linear_logit = self.linear_model(features)
-        sparse_feature_tensors, dense_feature_tensors = get_feature_tensors(
-            self.dnn_feature_columns, features, self.sparse_embedding_dict
+
+        (
+            sparse_feature_tensors,
+            dense_feature_tensors,
+            sparse_feature_columns,
+            _,
+        ) = get_feature_tensors(
+            self.dnn_feature_columns,
+            features,
+            self.sparse_embedding_dict,
+            ret_feature_columns=True,
         )
+
+        fm_embedding_dict = {}
+        for tensor, feat in zip(
+            sparse_feature_tensors, sparse_feature_columns
+        ):
+            if feat.name in self.fm_feature_names:
+                fm_embedding_dict[feat.name] = tensor
+        fm_dim_groups = group_embedding_by_dim(fm_embedding_dict)
+        fms = [
+            FM()(tf.concat(v, axis=1))
+            for v in fm_dim_groups.values()
+            if len(v) > 1
+        ]
+        fm_logit = tf.add_n(fms)
+
         dnn_input = combine_dnn_tensors(
             sparse_feature_tensors, dense_feature_tensors
         )
         dnn_output = self.dnn_model(dnn_input)
         dnn_logit = self.dnn_dense(dnn_output)
 
-        output = self.final(tf.add_n([linear_logit, dnn_logit]))
+        logit = tf.add_n([linear_logit, fm_logit, dnn_logit])
+        output = tf.nn.sigmoid(logit)
         return output

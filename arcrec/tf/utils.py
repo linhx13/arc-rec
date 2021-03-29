@@ -54,7 +54,10 @@ def seq_embedding_lookup(
 
 
 def get_feature_tensors(
-    feature_columns, features: Dict[str, tf.Tensor], embedding_dict
+    feature_columns,
+    features: Dict[str, tf.Tensor],
+    embedding_dict,
+    ret_feature_columns=False,
 ):
     sparse_features = []
     sparse_feature_columns = get_sparse_feature_columns(feature_columns)
@@ -66,7 +69,10 @@ def get_feature_tensors(
     dense_feature_tensors = [
         features[feat.name] for feat in dense_feature_columns
     ]
-    return sparse_feature_tensors, dense_feature_tensors
+    res = (sparse_feature_tensors, dense_feature_tensors)
+    if ret_feature_columns:
+        res = res + (sparse_feature_columns, dense_feature_columns)
+    return res
 
 
 def combine_dnn_tensors(sparse_tensors, dense_tensors):
@@ -80,3 +86,14 @@ def combine_dnn_tensors(sparse_tensors, dense_tensors):
             tf.keras.layers.Flatten()(tf.concat(dense_tensors, axis=-1))
         )
     return tf.concat(tensors, axis=-1)
+
+
+def group_embedding_by_dim(embedding_dict: Dict[str, tf.Tensor]):
+    groups = dict()
+    for embedding in embedding_dict.values():
+        dim = embedding.shape[-1]
+        if dim not in groups:
+            groups[dim] = [embedding]
+        else:
+            groups[dim].append(embedding)
+    return groups

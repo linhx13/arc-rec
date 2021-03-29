@@ -2,8 +2,8 @@ from typing import Dict
 
 import tensorflow as tf
 
-from ...features import *
-from ..utils import create_embedding_dict, get_feature_tensors
+from ..features import *
+from .utils import create_embedding_dict, get_feature_tensors
 
 
 class DNN(tf.keras.layers.Layer):
@@ -122,3 +122,21 @@ class Linear(tf.keras.layers.Layer):
         if self.use_bias:
             logits += self.bias
         return logits
+
+
+class FM(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(FM, self).__init__(**kwargs)
+
+    def call(self, inputs, **kwargs):
+        if len(inputs.shape) != 3:
+            raise ValueError(
+                "Unexpected inputs dimension %d, expected to be 3 dimensions"
+                % len(tf.shape(inputs))
+            )
+
+        square_of_sum = tf.square(tf.reduce_sum(inputs, axis=1, keepdims=True))
+        sum_of_square = tf.reduce_sum(inputs * inputs, axis=1, keepdims=True)
+        cross_term = square_of_sum - sum_of_square
+        cross_term = 0.5 * tf.reduce_sum(cross_term, axis=2, keepdims=False)
+        return cross_term
